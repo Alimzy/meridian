@@ -26,3 +26,4 @@ export * from "./delta-neutral";
 export * from "./costs";
 export * from "./slippage-model";
 export * from "./time-series";
+export * from "./historical-loader";
