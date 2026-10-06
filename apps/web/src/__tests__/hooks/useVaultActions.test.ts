@@ -112,6 +112,18 @@ import { wallet } from "../../lib/wallet";
 import { USDC_ISSUER, MUSDC_ISSUER, APP_NETWORK } from "@meridian/shared";
 
 const KEY = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+
+/**
+ * `setQueryData` calls that write the positions cache. Pricing a slippage
+ * floor also writes `["vault-state"]` through the same client, so assertions
+ * about the optimistic position have to look past it.
+ */
+function positionWrites(): unknown[][] {
+  return setQueryData.mock.calls.filter(
+    (call) => Array.isArray(call[0]) && call[0][0] === "positions"
+  ) as unknown[][];
+}
+
 // Pulled from the source of truth rather than hardcoded, so these fixtures
 // don't drift out of sync the next time the vault (and its mUSDC issuer) is
 // redeployed, as happened with the previous hardcoded value in #514.
@@ -252,6 +264,83 @@ describe("useVaultActions — deposit", () => {
 
     expect(ok).toBe(false);
     expect(api.buildDeposit).not.toHaveBeenCalled();
+  });
+
+  it("optimistically raises the cached position for the depositing vault", async () => {
+    const cached = [
+      { vaultId: "blend-usdc-fixed", shares: 100, deposited: 100 },
+      { vaultId: "other-vault", shares: 7, deposited: 7 },
+    ];
+    getQueryData.mockReturnValueOnce(cached);
+
+    const { result } = renderHook(() => useVaultActions());
+
+    await act(async () => {
+      await result.current.deposit(
+        "10",
+        "blend-usdc-fixed",
+        "USDC",
+        undefined,
+        true
+      );
+    });
+
+    const writes = positionWrites();
+    expect(writes).toHaveLength(1);
+
+    // Mirrors the withdraw flow: the cache entry is computed eagerly from the
+    // pre-submit snapshot and written back as a value, not an updater fn.
+    const [key, updated] = writes[0] as [unknown, typeof cached];
+    expect(key).toEqual(["positions", KEY]);
+    expect(updated[0]).toMatchObject({ shares: 110, deposited: 110 });
+    // Unrelated positions are passed through untouched.
+    expect(updated[1]).toBe(cached[1]);
+  });
+
+  it("converts the deposit through the implied share price when deposited differs from shares", async () => {
+    // 100 shares backed by 120 USDC -> implied share price 1.2, so a 10 USDC
+    // deposit mints 10 / 1.2 = 8.333… shares. A raw `shares + amount` (110)
+    // or an inverted `amount * impliedSharePrice` (112) both fail this.
+    const cached = [
+      { vaultId: "blend-usdc-fixed", shares: 100, deposited: 120 },
+    ];
+    getQueryData.mockReturnValueOnce(cached);
+
+    const { result } = renderHook(() => useVaultActions());
+
+    await act(async () => {
+      await result.current.deposit(
+        "10",
+        "blend-usdc-fixed",
+        "USDC",
+        undefined,
+        true
+      );
+    });
+
+    const [, updated] = positionWrites()[0] as [unknown, typeof cached];
+    expect(updated[0].shares).toBeCloseTo(100 + 10 / 1.2, 10);
+    expect(updated[0].shares).not.toBe(110);
+    expect(updated[0].shares).not.toBe(112);
+    expect(updated[0].deposited).toBe(130);
+  });
+
+  it("does not fabricate a position when none is cached yet", async () => {
+    getQueryData.mockReturnValueOnce(undefined);
+
+    const { result } = renderHook(() => useVaultActions());
+
+    await act(async () => {
+      await result.current.deposit(
+        "10",
+        "blend-usdc-fixed",
+        "USDC",
+        undefined,
+        true
+      );
+    });
+
+    expect(positionWrites()).toHaveLength(0);
   });
 });
 
