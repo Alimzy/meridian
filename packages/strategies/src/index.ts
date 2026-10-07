@@ -33,3 +33,4 @@ export * from "./multi-collateral";
 export * from "./config";
 export * from "./projections";
 export * from "./self-repaying-loan";
+export * from "./monitor";
