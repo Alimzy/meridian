@@ -31,3 +31,4 @@ export * from "./historical-loader";
 export * from "./models/liquidation-parameter";
 export * from "./multi-collateral";
 export * from "./config";
+export * from "./projections";
