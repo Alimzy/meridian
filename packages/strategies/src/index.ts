@@ -35,3 +35,4 @@ export * from "./projections";
 export * from "./self-repaying-loan";
 export * from "./monitor";
 export * from "./scenario-runner";
+export * from "./accrual";
